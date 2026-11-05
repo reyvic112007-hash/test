@@ -1,0 +1,79 @@
+
+local SCRIPT_URL = "https://raw.githubusercontent.com/reyvic112007-hash/test/refs/heads/main/test3"
+
+local safePcall = pcall
+local safeType = type
+local spawnTask = task.spawn
+local checkHook = isfunctionhooked
+local httpGet = game.HttpGet
+local compile = loadstring
+
+local Players = game:GetService("Players")
+local reported = false
+
+local function deny(confirmedTamper)
+    -- Silent. No warn, no print, no webhook. Only kick on confirmed tamper.
+    if not confirmedTamper or reported then
+        return false
+    end
+    reported = true
+
+    local player = Players.LocalPlayer
+    if not player then
+        return false
+    end
+
+    safePcall(function()
+        player:Kick("Script protection detected a modified environment.")
+    end)
+    return false
+end
+
+local function checkFunction(fn, label)
+    local ok, hooked = safePcall(checkHook, fn)
+    if not ok or safeType(hooked) ~= "boolean" then
+        return deny(false)
+    end
+    if hooked then
+        return deny(true)
+    end
+    return true
+end
+
+local function protectionOK()
+    if safeType(checkHook) ~= "function"
+        or safeType(httpGet) ~= "function"
+        or safeType(compile) ~= "function" then
+        return deny(false)
+    end
+
+    if isfunctionhooked ~= checkHook
+        or game.HttpGet ~= httpGet
+        or loadstring ~= compile
+        or pcall ~= safePcall
+        or type ~= safeType then
+        return deny(true)
+    end
+
+    return checkFunction(httpGet, "HttpGet")
+        and checkFunction(compile, "loadstring")
+end
+
+if not protectionOK() then return end
+
+local fetched, source = safePcall(httpGet, game, SCRIPT_URL)
+if not fetched or safeType(source) ~= "string" or #source == 0 then
+    deny(false)
+    return
+end
+
+if not protectionOK() then return end
+
+local compiled, main, compileError = safePcall(compile, source)
+if not compiled or safeType(main) ~= "function" then
+    deny(false)
+    return
+end
+
+if not protectionOK() then return end
+main()
